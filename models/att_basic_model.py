@@ -52,7 +52,6 @@ class AttBasicModel(BasicModel):
             if cfg.MODEL.ATT_HIDDEN_SIZE > 0 else None
 
         # bilinear
-        # wxt
         if cfg.MODEL.BILINEAR.DIM > 0:
             self.p_att_feats = None
             self.encoder_layers = blocks.create(
@@ -96,7 +95,6 @@ class AttBasicModel(BasicModel):
         p_att_feats = self.p_att_feats(att_feats) if self.p_att_feats is not None else None
 
         # bilinear
-        # wxt encoder output results
         if cfg.MODEL.BILINEAR.DIM > 0:
             gv_feat, att_feats = self.encoder_layers(gv_feat, att_feats, att_mask)
             keys, value2s = self.attention.precompute(att_feats, att_feats)
@@ -111,7 +109,6 @@ class AttBasicModel(BasicModel):
         gv_feat, att_feats, att_mask, p_att_feats = self.preprocess(**kwargs)
         gv_feat = utils.expand_tensor(gv_feat, cfg.DATA_LOADER.SEQ_PER_IMG)
         att_feats = utils.expand_tensor(att_feats, cfg.DATA_LOADER.SEQ_PER_IMG)
-        # todo: wxt: what's the meaning of att_mask?
         att_mask = utils.expand_tensor(att_mask, cfg.DATA_LOADER.SEQ_PER_IMG)
         p_att_feats = utils.expand_tensor(p_att_feats, cfg.DATA_LOADER.SEQ_PER_IMG)
 

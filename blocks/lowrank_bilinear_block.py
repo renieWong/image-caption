@@ -50,7 +50,6 @@ class LowRankBilinearLayer(nn.Module):
     def precompute(self, key, value2):
         return self.encoder_attn.precompute(key, value2)
 
-# wxt
 class LowRankBilinearEncBlock(nn.Module):
     def __init__(
         self, 

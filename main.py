@@ -62,7 +62,7 @@ class Trainer(object):
         )
         self.scorer = Scorer()
         # self.writer = SummaryWriter(os.path.join(cfg.ROOT_DIR, 'logs/c2_b2_m2'))
-        self.writer = SummaryWriter(os.path.join(cfg.ROOT_DIR, 'logs/cl'))
+        self.writer = SummaryWriter(os.path.join(cfg.ROOT_DIR, 'logs/1-ori-8-rl'))
 
     def setup_logging(self):
         self.logger = logging.getLogger(cfg.LOGGER_NAME)
@@ -91,11 +91,12 @@ class Trainer(object):
         model = models.create(cfg.MODEL.TYPE)
 
         if self.distributed:
+            # this should be removed if we update BatchNorm stats
             self.model = torch.nn.parallel.DistributedDataParallel( 
                 model.to(self.device),
                 device_ids = [self.args.local_rank],
                 output_device = self.args.local_rank,
-                broadcast_buffers = False,
+                broadcast_buffers = False
                 # find_unused_parameters = True
             )
         else:
@@ -106,15 +107,22 @@ class Trainer(object):
                 torch.load(self.snapshot_path("caption_model", self.args.resume),
                     map_location=lambda storage, loc: storage),strict=False#加了strict=False
             )
-     
+        # if self.args.resume > 0:
+        #     self.model.load_state_dict(
+        #         {k.replace('module.','').replace('.0','').replace('.1','').replace('.2','').replace('.3',''):v for k,v in
+        #         torch.load(self.snapshot_path("caption_model", self.args.resume),
+        #             map_location=lambda storage, loc: storage).items()}
+        #     )
+   
+       
         self.optim = Optimizer(self.model)                                
         self.xe_criterion = losses.create(cfg.LOSSES.XE_TYPE).cuda()      
-        self.rl_criterion = losses.create(cfg.LOSSES.RL_TYPE).cuda() 
-        self.cl_criterion = losses.create(cfg.LOSSES.CL_TYPE).cuda() #对比学习    
+        self.rl_criterion = losses.create(cfg.LOSSES.RL_TYPE).cuda()      
 
     def setup_dataset(self):
+        # pdb.set_trace()          # TODO
         print(cfg.DATA_LOADER.TRAIN_ID)
-        self.coco_set = datasets.coco_dataset.CocoDataset(#往这个里面传参，参数对的上是不用改的，在这个文件里面改了之后，返回回来的输出值就会变多了
+        self.coco_set = datasets.coco_dataset.CocoDataset(
             image_ids_path = cfg.DATA_LOADER.TRAIN_ID,
             input_seq = cfg.DATA_LOADER.INPUT_SEQ_PATH,
             target_seq = cfg.DATA_LOADER.TARGET_SEQ_PATH,
@@ -125,7 +133,7 @@ class Trainer(object):
         )
 
     def setup_loader(self, epoch):
-        self.training_loader = datasets.data_loader.load_train(#batch中全部的输入
+        self.training_loader = datasets.data_loader.load_train(
             self.distributed, epoch, self.coco_set)
 
     def eval(self, epoch):
@@ -169,6 +177,7 @@ class Trainer(object):
 
     def snapshot_path(self, name, epoch):
         snapshot_folder = os.path.join(cfg.ROOT_DIR, 'snapshot')
+        # snapshot_folder = cfg.ROOT_DIR                  # TODO
         return os.path.join(snapshot_folder, name + "_" + str(epoch) + ".pth")
 
     def save_model(self, epoch):
@@ -205,49 +214,27 @@ class Trainer(object):
             ss_prob = min(cfg.TRAIN.SCHEDULED_SAMPLING.INC_PROB * frac, cfg.TRAIN.SCHEDULED_SAMPLING.MAX_PROB)
             self.model.module.ss_prob = ss_prob
 
-    # def display(self, iteration, data_time, batch_time, losses, loss_info, ce_loss, ce_loss_info, cl_loss, cl_loss_info):
     def display(self, iteration, data_time, batch_time, losses, loss_info):
         if iteration % cfg.SOLVER.DISPLAY != 0:
             return
         if self.distributed and dist.get_rank() > 0:
             return
-        # info_str = ' (DataTime/BatchTime: {:.3}/{:.3}) losses = {:.5} ce_losses = {:.5} cl_losses = {:.5}'.format(data_time.avg, batch_time.avg, losses.avg, ce_loss.avg, cl_loss.avg)
-        info_str = ' (DataTime/BatchTime: {:.3}/{:.3}) losses = {:.5} '.format(data_time.avg, batch_time.avg, losses.avg)
+        info_str = ' (DataTime/BatchTime: {:.3}/{:.3}) losses = {:.5}'.format(data_time.avg, batch_time.avg, losses.avg)
         self.logger.info('Iteration ' + str(iteration) + info_str +', lr = ' +  str(self.optim.get_lr()))
         self.writer.add_scalar('Train/lr', self.optim.get_lr()[0], iteration)             
         self.writer.add_scalar('Train/loss', losses.avg, iteration)            # TODO 
-        # self.writer.add_scalar('Train/loss', losses.avg, ce_loss.avg, cl_loss.avg, iteration)    
         # pdb.set_trace()
         for name in sorted(loss_info):
             self.logger.info('  ' + name + ' = ' + str(loss_info[name]))
-        # for name1 in sorted(ce_loss_info):
-        #     self.logger.info('  ' + name1 + ' = ' + str(ce_loss_info[name]))
-        # for name2 in sorted(cl_loss_info):
-        #     self.logger.info('  ' + name2 + ' = ' + str(cl_loss_info[name]))
         data_time.reset()
         batch_time.reset()
         losses.reset()
-        # ce_loss.reset()
-        # cl_loss.reset()
 
-    def forward(self, kwargs, times_in_iteration,logit_from_2):
+    def forward(self, kwargs):
         if self.rl_stage == False:
-            if times_in_iteration == 1:
-                logit = self.model(**kwargs)
-                loss, loss_info = self.xe_criterion(logit, kwargs[cfg.PARAM.TARGET_SENT])
-                return loss, loss_info
-            if times_in_iteration == 2:
-                logit = self.model(**kwargs)
-                return logit
-            if times_in_iteration == 3:
-                logit = self.model(**kwargs)
-                lateral_logit = logit
-                frontal_logit = logit_from_2
-                # print(lateral_logit.size())#[8,65,778]
-                # print(frontal_logit.size())#[8,65,778]
-                loss, loss_info = self.cl_criterion(frontal_logit, lateral_logit)
-                return loss, loss_info
-        else:#强化学习阶段
+            logit = self.model(**kwargs)
+            loss, loss_info = self.xe_criterion(logit, kwargs[cfg.PARAM.TARGET_SENT])
+        else:
             ids = kwargs[cfg.PARAM.INDICES]
             gv_feat = kwargs[cfg.PARAM.GLOBAL_FEAT]
             att_feats = kwargs[cfg.PARAM.ATT_FEATS]
@@ -260,13 +247,13 @@ class Trainer(object):
             kwargs[cfg.PARAM.ATT_FEATS] = att_feats
             kwargs[cfg.PARAM.ATT_FEATS_MASK] = att_mask
             
-            #验证模式
+            
             self.model.eval()
             with torch.no_grad():
-                seq_max, logP_max = self.model.module.decode(**kwargs)#对kewargs解码
-            #训练模式  
+                seq_max, logP_max = self.model.module.decode(**kwargs)
+             
             self.model.train()
-            rewards_max, rewards_info_max = self.scorer(ids, seq_max.data.cpu().numpy().tolist()) 
+            rewards_max, rewards_info_max = self.scorer(ids, seq_max.data.cpu().numpy().tolist()) #
             rewards_max = utils.expand_numpy(rewards_max)
 
             ids = utils.expand_numpy(ids)
@@ -284,9 +271,9 @@ class Trainer(object):
             seq_sample, logP_sample = self.model.module.decode(**kwargs)
             rewards_sample, rewards_info_sample = self.scorer(ids, seq_sample.data.cpu().numpy().tolist())
 
-            rewards = rewards_sample - rewards_max #reards =（eval）采样-（train）最大
-            rewards = torch.from_numpy(rewards).float().cuda()#numpy转torch
-            loss = self.rl_criterion(seq_sample, logP_sample, rewards)#得到强化学习loss
+            rewards = rewards_sample - rewards_max 
+            rewards = torch.from_numpy(rewards).float().cuda()
+            loss = self.rl_criterion(seq_sample, logP_sample, rewards)
 
             loss_info = {}
             for key in rewards_info_sample:
@@ -294,18 +281,15 @@ class Trainer(object):
             for key in rewards_info_max:
                 loss_info[key + '_max'] = rewards_info_max[key]
 
-            return loss, loss_info
+        return loss, loss_info
 
     def train(self):
         self.model.train()
         self.optim.zero_grad()
 
         iteration = 0 
-        times_in_iteration = 0 #在一次前向过程中分为三次
-
         self.total_score = []
-
-        for epoch in range(cfg.SOLVER.MAX_EPOCH):
+        for epoch in  range(cfg.SOLVER.MAX_EPOCH):
             if epoch == cfg.TRAIN.REINFORCEMENT.START:
                 self.rl_stage = True
             self.setup_loader(epoch)
@@ -314,86 +298,30 @@ class Trainer(object):
             data_time = AverageMeter()
             batch_time = AverageMeter()
             losses = AverageMeter()
-            # ce_loss = AverageMeter()
-            # cl_loss = AverageMeter()
-            for _, (indices, input_seq, target_seq, gv_feat, att_feats,att_feats_frontal,att_feats_lateral,att_mask) in enumerate(self.training_loader):
+            for _, (indices, input_seq, target_seq, gv_feat, att_feats, att_mask) in enumerate(self.training_loader):
                 data_time.update(time.time() - start)
 
-                for times_in_iteration in range(4):
-                    times_in_iteration += 1
-    
-                    if times_in_iteration == 1:
-                        att_feats = att_feats
+                input_seq = input_seq.cuda()
+                target_seq = target_seq.cuda()
+                gv_feat = gv_feat.cuda()
+                att_feats = att_feats.cuda()
+                att_mask = att_mask.cuda()
 
-                        input_seq = input_seq.cuda()
-                        target_seq = target_seq.cuda()
-                        gv_feat = gv_feat.cuda()
-                        att_feats = att_feats.cuda()#从这里加载进来了最初的图像特征
-                        att_mask = att_mask.cuda()
-                        kwargs = self.make_kwargs(indices, input_seq, target_seq, gv_feat, att_feats, att_mask)
-                        ce_loss, ce_loss_info = self.forward(kwargs, times_in_iteration,0)
-                        
-                    if times_in_iteration == 2: 
-                        att_feats = att_feats_frontal
-
-                        input_seq = input_seq.cuda()
-                        target_seq = target_seq.cuda()
-                        gv_feat = gv_feat.cuda()
-                        att_feats = att_feats.cuda()
-                        att_mask = att_mask.cuda()
-                        kwargs = self.make_kwargs(indices, input_seq, target_seq, gv_feat, att_feats, att_mask)
-                        frontal_logit = self.forward(kwargs, times_in_iteration,0)
-
-                    if times_in_iteration == 3: 
-                        att_feats = att_feats_lateral
-
-                        input_seq = input_seq.cuda()
-                        target_seq = target_seq.cuda()
-                        gv_feat = gv_feat.cuda()
-                        att_feats = att_feats.cuda()
-                        att_mask = att_mask.cuda()
-                        kwargs = self.make_kwargs(indices, input_seq, target_seq, gv_feat, att_feats, att_mask)
-                        cl_loss, cl_loss_info = self.forward(kwargs, times_in_iteration,frontal_logit)
-
-                #梯度累加 
-                alpha = 0.5
-                # loss = alpha*ce_loss + (1-alpha)*cl_loss 
-                # loss_info = alpha*ce_loss_info + (1-alpha)*cl_loss_info 
-              
-                
-                # print(ce_loss_info,cl_loss_info)#{'CrossEntropy Loss': 6.680755615234375} {'InfoNCE Loss': 1.7521839141845703}
-                # print(type(ce_loss_info),type(cl_loss_info)) #<class 'dict'> <class 'dict'>
-                loss = ce_loss + alpha*cl_loss
-                # loss_info = ce_loss_info + alpha*cl_loss_info 
-                dict_loss = {'loss':float(loss)}
-                loss_info_1 = dict(ce_loss_info , **cl_loss_info )
-                loss_info = dict(loss_info_1,**dict_loss)
-                # print('hello world!')
-                # print(loss)
-                # print(loss_info)#{'CrossEntropy Loss': 6.69242000579834, 'InfoNCE Loss': 1.651829481124878, 'loss': tensor(7.5183, device='cuda:0', grad_fn=<AddBackward0>)}
-
-            
-               
-               
-                
-
+                kwargs = self.make_kwargs(indices, input_seq, target_seq, gv_feat, att_feats, att_mask)
+                loss, loss_info = self.forward(kwargs)
                 loss.backward()
-                utils.clip_gradient(self.optim.optimizer, self.model,
+                utils.clip_gradient(self.optim.optimizer, self.model, 
                     cfg.SOLVER.GRAD_CLIP_TYPE, cfg.SOLVER.GRAD_CLIP)
                 self.optim.step()
                 self.optim.zero_grad()
                 self.optim.scheduler_step('Iter')
+
                 batch_time.update(time.time() - start)
                 start = time.time()
-
                 losses.update(loss.item())
-                # ce_loss.update(ce_loss.item())
-                # cl_loss.update(cl_loss.item())
-
-                # self.display(iteration, data_time, batch_time, losses, loss_info, ce_loss, ce_loss_info, cl_loss, cl_loss_info)
                 self.display(iteration, data_time, batch_time, losses, loss_info)
-
                 iteration += 1
+
                 if self.distributed:
                     dist.barrier()
 
@@ -408,13 +336,11 @@ class Trainer(object):
                 dist.barrier()
 
 def parse_args():
-    #执行文件时输入配置arg，在config文件中修改cfg参数
     """
     Parse input arguments
     """
     parser = argparse.ArgumentParser(description='Image Captioning')
-    # parser.add_argument('--folder', dest='folder', type=str, default=None)
-    parser.add_argument('--folder', dest='folder', type=str, default='/mnt/sdc/ruizhi/cl/image-captioning/experiments/xlan-openi-cl')
+    parser.add_argument('--folder', dest='folder', type=str, default=None)
     parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument("--resume", type=int, default=-1)
 

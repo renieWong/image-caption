@@ -38,4 +38,3 @@ class SCAtt(BasicAtt):
 
         attn = value1 * value2 * alpha_channel
         return attn
-#xlan

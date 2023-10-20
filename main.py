@@ -105,8 +105,7 @@ class Trainer(object):
         if self.args.resume > 0:
             self.model.load_state_dict(
                 torch.load(self.snapshot_path("caption_model", self.args.resume),
-                    map_location=lambda storage, loc: storage),strict=False#加了strict=False
-            )
+                    map_location=lambda storage, loc: storage),strict=False
         # if self.args.resume > 0:
         #     self.model.load_state_dict(
         #         {k.replace('module.','').replace('.0','').replace('.1','').replace('.2','').replace('.3',''):v for k,v in

@@ -16,3 +16,14 @@ If you use or extend our work, please cite our paper at TNNLS-2023 and ICASSP-20
     booktitle={Proceedings of the IEEE International Conference on Acoustics, Speech and Signal Processing},  
     year={2023}  
     }
+
+
+# Requirements
+
+    conda env create -f environment.yml
+
+# Datasets
+To download datasets:
+   * IU-X-Ray
+   * MIMIC-CXR
+   

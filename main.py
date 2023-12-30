@@ -61,8 +61,7 @@ class Trainer(object):
             eval_annfile = cfg.INFERENCE.TEST_ANNFILE
         )
         self.scorer = Scorer()
-        # self.writer = SummaryWriter(os.path.join(cfg.ROOT_DIR, 'logs/c2_b2_m2'))
-        self.writer = SummaryWriter(os.path.join(cfg.ROOT_DIR, 'logs/1-ori-8-rl'))
+        self.writer = SummaryWriter(os.path.join(cfg.ROOT_DIR, 'logs'))
 
     def setup_logging(self):
         self.logger = logging.getLogger(cfg.LOGGER_NAME)
@@ -92,12 +91,11 @@ class Trainer(object):
 
         if self.distributed:
             # this should be removed if we update BatchNorm stats
-            self.model = torch.nn.parallel.DistributedDataParallel( 
+            self.model = torch.nn.parallel.DistributedDataParallel(
                 model.to(self.device),
                 device_ids = [self.args.local_rank],
                 output_device = self.args.local_rank,
                 broadcast_buffers = False
-                # find_unused_parameters = True
             )
         else:
             self.model = torch.nn.DataParallel(model).cuda()
@@ -105,18 +103,12 @@ class Trainer(object):
         if self.args.resume > 0:
             self.model.load_state_dict(
                 torch.load(self.snapshot_path("caption_model", self.args.resume),
-                    map_location=lambda storage, loc: storage),strict=False
-        # if self.args.resume > 0:
-        #     self.model.load_state_dict(
-        #         {k.replace('module.','').replace('.0','').replace('.1','').replace('.2','').replace('.3',''):v for k,v in
-        #         torch.load(self.snapshot_path("caption_model", self.args.resume),
-        #             map_location=lambda storage, loc: storage).items()}
-        #     )
-   
-       
-        self.optim = Optimizer(self.model)                                
-        self.xe_criterion = losses.create(cfg.LOSSES.XE_TYPE).cuda()      
-        self.rl_criterion = losses.create(cfg.LOSSES.RL_TYPE).cuda()      
+                    map_location=lambda storage, loc: storage)
+            )
+
+        self.optim = Optimizer(self.model)
+        self.xe_criterion = losses.create(cfg.LOSSES.XE_TYPE).cuda()
+        self.rl_criterion = losses.create(cfg.LOSSES.RL_TYPE).cuda()
 
     def setup_dataset(self):
         # pdb.set_trace()          # TODO
@@ -245,14 +237,12 @@ class Trainer(object):
             kwargs[cfg.PARAM.GLOBAL_FEAT] = gv_feat
             kwargs[cfg.PARAM.ATT_FEATS] = att_feats
             kwargs[cfg.PARAM.ATT_FEATS_MASK] = att_mask
-            
-            
+
             self.model.eval()
             with torch.no_grad():
                 seq_max, logP_max = self.model.module.decode(**kwargs)
-             
             self.model.train()
-            rewards_max, rewards_info_max = self.scorer(ids, seq_max.data.cpu().numpy().tolist()) #
+            rewards_max, rewards_info_max = self.scorer(ids, seq_max.data.cpu().numpy().tolist())
             rewards_max = utils.expand_numpy(rewards_max)
 
             ids = utils.expand_numpy(ids)
@@ -270,7 +260,7 @@ class Trainer(object):
             seq_sample, logP_sample = self.model.module.decode(**kwargs)
             rewards_sample, rewards_info_sample = self.scorer(ids, seq_sample.data.cpu().numpy().tolist())
 
-            rewards = rewards_sample - rewards_max 
+            rewards = rewards_sample - rewards_max
             rewards = torch.from_numpy(rewards).float().cuda()
             loss = self.rl_criterion(seq_sample, logP_sample, rewards)
 
@@ -286,7 +276,7 @@ class Trainer(object):
         self.model.train()
         self.optim.zero_grad()
 
-        iteration = 0 
+        iteration = 0
         self.total_score = []
         for epoch in  range(cfg.SOLVER.MAX_EPOCH):
             if epoch == cfg.TRAIN.REINFORCEMENT.START:
@@ -309,7 +299,7 @@ class Trainer(object):
                 kwargs = self.make_kwargs(indices, input_seq, target_seq, gv_feat, att_feats, att_mask)
                 loss, loss_info = self.forward(kwargs)
                 loss.backward()
-                utils.clip_gradient(self.optim.optimizer, self.model, 
+                utils.clip_gradient(self.optim.optimizer, self.model,
                     cfg.SOLVER.GRAD_CLIP_TYPE, cfg.SOLVER.GRAD_CLIP)
                 self.optim.step()
                 self.optim.zero_grad()

@@ -1,13 +1,11 @@
 from losses.cross_entropy import CrossEntropy
 from losses.label_smoothing import LabelSmoothing
 from losses.reward_criterion import RewardCriterion
-from losses.infonce import InfoNCE
 
 __factory = {
     'CrossEntropy': CrossEntropy,
     'LabelSmoothing': LabelSmoothing,
     'RewardCriterion': RewardCriterion,
-    'InfoNCE':InfoNCE,
 }
 
 def names():
